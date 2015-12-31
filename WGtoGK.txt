@@ -1,0 +1,66 @@
+// Easting,
+// E =  FE + k0*nu[A + (1 - T + C)A^3/6 + (5 - 18T + T^2 + 72C - 58e'sq)A^5/120]
+//
+// Northing,
+// N =  FN + k0{M - M0 + nu*tan(lat)[A^2/2 + (5 - T + 9C + 4C^2)A^4/24 +
+//             (61 - 58T + T^2 + 600C - 330e'sq)A^6/720]}
+// where
+//   T = tan^2(lat)
+//   nu = a /(1 - esq*sin^2(lat))^0.5
+//   C = esq*cos^2(lat)/(1 - esq)
+//   A = (lon - lon0)cos(lat), with lon and lon0 in radians.
+//   M = a[(1 - esq/4 - 3e^4/64 - 5e^6/256 -....)lat -
+//         (3esq/8 + 3e^4/32 + 45e^6/1024+....)sin(2*lat) +
+//         (15e^4/256 + 45e^6/1024 +.....)sin(4*lat) -
+//         (35e^6/3072 + ....)sin(6*lat) + .....]
+//
+
+procedure TfrmSmap.WGStoGK(ilat : double; ilon : double; var x : double; var y : double);
+var
+ A_, a, T, nu, e, esq, e_sq, E4: Double;
+ E6, C, C_, Lon0, Lat0, M, M0, K0: Double;
+ alpha, FN, FE, Lat, Lon, Zone: Double;
+begin
+ FN    := 0;
+ FE    := 500000;
+ a     := 6378245;
+ alpha := 1 / 298.3; // сжатие Земли
+ K0    := 0.9996013;
+ Zone  := 39;
+
+ Lat := iLat / 57.29577951;
+ Lon := iLon / 57.29577951;
+ Lat0 := 0 / 57.29577951;
+ Lon0 := ZONE / 57.29577951;
+////////////////////////////////////////////////////////////////////////////////
+
+esq := (alpha) * 2 - Power(alpha,2);
+e   := sqrt(esq);
+C   := esq * Power(Cos(Lat),2) / (1 - esq);
+nu  := a / sqrt(1 - esq * Power(Sin(Lat),2));
+A_  := (Lon - Lon0) * Cos(Lat);
+T   := Power(Tan(Lat),2);
+
+E4 :=Power(e,4);
+E6 :=Power(e,6);
+
+M   := a*(
+            (1 - esq/4   -  3*E4/64 -  5*E6/256 )*Lat-
+            (  3*esq/8   +  3*E4/32 + 45*E6/1024)*Sin(2*Lat)+
+            (  15*E4/256 + 45*E6/1024           )*Sin(4*Lat)-
+            (  35*E6/3072                       )*Sin(6*Lat)
+         );
+M0  := a*(
+            (1 - esq/4   -  3*E4/64 -  5*E6/256 )*Lat0-
+            (  3*esq/8   +  3*E4/32 + 45*E6/1024)*Sin(2*Lat0)+
+            (  15*E4/256 + 45*E6/1024           )*Sin(4*Lat0)-
+            (  35*E6/3072                       )*Sin(6*Lat0)
+         );
+
+
+
+x := FE + K0 * nu * (A_ + (1 - T + C_) * Power(A_,3) / 6 + (5 - 18 * T + Power(T,2) + 72 * C_ - 58 * e_sq) * Power(A_,5) / 120);
+y := FN + K0 * (M - M0 + nu * Tan(Lat) * (Power(A_,2) / 2 + (5 - T + 9 * C + 4 * Power(C,2)) * Power(A_,4) / 24 + (61 - 58 * T + Power(T,2) + 600 * C - 3
+30 * e_sq) * Power(A_,6) / 720));
+
+End;

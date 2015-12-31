@@ -1,0 +1,305 @@
+unit geodetic;
+
+interface
+ uses math, types;
+
+ type
+  TGMS = record
+   Gradus : smallint;
+   Minute : smallint;
+   Secund : double;
+   err    : boolean;
+   txt    : string;
+  end;
+
+  procedure GKtoWGS(var ilat : double; var ilon : double; x : double; y : double);
+  function ToGMS(degree:Double):TGMS;
+  function ToDeg(grad:TGMS):Extended;
+
+implementation
+
+////////////////////////////////////////////////////////////////////////////////
+//
+//        Поворот системы координат вокруг произвольно выбранной точки
+//        углы измеряются в радианах
+//
+////////////////////////////////////////////////////////////////////////////////
+function RotateVector(coordIn,center:tPoint;angle:real):TPoint;
+  begin
+     result.X :=Center.X +round((CoordIn.X-Center.X)*cos(angle)-(CoordIn.Y-Center.Y)*sin(angle));
+     result.Y :=Center.Y +round((CoordIn.Y-Center.Y)*cos(angle)+(CoordIn.X-Center.X)*sin(angle));
+  end;
+
+////////////////////////////////////////////////////////////////////////////////
+//
+//       Преобразование WGS в Трансверс Меркатор по Нефтяникам
+//
+//                            Note:
+// These formulas have been transcribed from EPSG Guidance Note #7.
+// Users are encouraged to use that document rather than the text which follows
+// as reference because limitations in the transcription will be avoided.
+//
+// The formulas to derive the projected Easting and Northing coordinates are in
+// the form of a series as follows:
+//
+// Easting,
+// E =  FE + k0*nu[A + (1 - T + C)A^3/6 + (5 - 18T + T^2 + 72C - 58e'sq)A^5/120]
+//
+// Northing,
+// N =  FN + k0{M - M0 + nu*tan(lat)[A^2/2 + (5 - T + 9C + 4C^2)A^4/24 +
+//             (61 - 58T + T^2 + 600C - 330e'sq)A^6/720]}
+// where
+//   T = tan^2(lat)
+//   nu = a /(1 - esq*sin^2(lat))^0.5
+//   C = esq*cos^2(lat)/(1 - esq)
+//   A = (lon - lon0)cos(lat), with lon and lon0 in radians.
+//   M = a[(1 - esq/4 - 3e^4/64 - 5e^6/256 -....)lat -
+//         (3esq/8 + 3e^4/32 + 45e^6/1024+....)sin(2*lat) +
+//         (15e^4/256 + 45e^6/1024 +.....)sin(4*lat) -
+//         (35e^6/3072 + ....)sin(6*lat) + .....]
+//
+// with lat in radians and M0 for lat0, the latitude of the origin, derived in
+// the same way.
+//
+// The reverse formulas to convert Easting and Northing projected coordinates
+// to latitude and longitude are:
+//
+// lat = lat1 - (nu1*tan(lat1)/rho1)[D^2/2 -
+//              (5 + 3*T1 + 10*C1 - 4*C1^2 - 9*e'^2)D^4/24 +
+//              (61 + 90*T1 + 298*C1 + 45*T1^2 - 252*e'^2 - 3*C1^2)D^6/720]
+// lon = lon0 + [D - (1 + 2*T1 + C1)D^3/6 + (5 - 2*C1 + 28*T1 -
+//              3*C1^2 + 8*e'^2 + 24*T1^2)D^5/120] / cos(lat1)
+// where lat1 may be found as for the Cassini projection from:
+//
+// lat1 = mu1 + ((3*e1)/2 - 27*e1^3/32 +.....)sin(2*lat1) +
+//              (21*e1^2/16 -55*e1^4/32 + ....)sin(4*lat1)+
+//              (151*e1^3/96 +.....)sin(6*lat1) +
+//              (1097*e1^4/512 - ....)sin(8*lat1) + ......
+// and where
+//  nu1 = a /(1 - esq*sin^2(lat1))^0.5
+//  rho1 = a(1 - esq)/(1 - esq*sin^2(lat1))^1.5
+//  e1 = [1- (1 - esq)^0.5]/[1 + (1 - esq)^0.5]
+//  mu1 = M1/[a(1 - esq/4 - 3e^4/64 - 5e^6/256 - ....)]
+//  M1 = M0 + (N - FN)/k0
+//  T1 = tan^2(lat1)
+//  C1 = e'^2*cos^2(lat1)
+//  D = (E - FE)/(nu1*k0),
+// with
+//  nu1 = nu for lat1
+//
+// For areas south of the equator the value of latitude lat will be negative
+// and the formulas above, to compute the E and N,  will automatically result
+// in the correct values. Note that the false northings of the origin, if
+// the equator, will need to be large to avoid negative northings and for
+// the UTM projection is in fact 10,000,000m. Alternatively, as in the case
+// of Argentina's Transverse Mercator (Gauss-Kruger) zones, the origin is at
+// the south pole with a northings of zero. However each zone central meridian
+// takes a false easting of 500000m prefixed by an identifying zone number.
+// This ensures that instead of points in different zones having the
+// same eastings, every point in the country, irrespective of its
+// projection zone, will have a unique set of projected system coordinates.
+// Strict application of the above formulas, with south latitudes negative,
+// will result in the derivation of the correct Eastings and Northings.
+//
+// Similarly, in applying the reverse formulas to determine a latitude south of
+// the equator, a negative sign for lat results from a negative lat1 which in
+// turn results from a negative M1.
+//
+// For Projected Coordinate System OSGB 1936 / British National Grid
+//
+//  Parameters:
+// Ellipsoid  Airy 1830
+//  a = 6377563.396 m
+//  1/f = 299.32496
+// then
+// e'^2 = 0.00671534
+//  and
+// e^2 = 0.00667054
+//
+// Latitude Natural Origin         49°00'00"N   = 0.85521133 rad
+// Longitude Natural Origin        2°00'00"W  = -0.03490659 rad
+// Scale factor ko                     0.9996013                                                                                              False Eastings FE                 400000.00 m
+// False Northings FN              -100000.00 m
+
+// Forward calculation for:
+// Latitude       50°30'00.00"N  = 0.88139127 rad
+// Longitude    00°30'00.00"E  = 0.00872665 rad
+// A  = 0.02775415       C = 0.00271699
+// T =  1.47160434       M = 5596050.46
+// M0 = 5429228.60       nu  = 6390266.03
+
+// Then Easting E = 577274.99 m
+//     Northing N = 69740.50 m
+//
+//Reverse calculations for same easting and northing first gives :
+// e1    = 0.00167322
+// mu1   = 0.87939562
+// M1    = 5599036.80
+// nu1   = 6390275.88
+// phi1  = 0.88185987
+// D     = 0.02775243
+// rho1  = 6372980.21
+// C1    =  0.00271391
+//T1 = 1.47441726
+//
+//  Then Latitude       = 50°30'00.000"N
+//         Longitude    = 00°30'00.000"E
+//
+////////////////////////////////////////////////////////////////////////////////
+//                     Определение переменных и аргументов
+//   http://www.posc.org/Epicentre.2_2/DataModel/ExamplesofUsage/eu_cs34d.html
+//
+////////////////////////////////////////////////////////////////////////////////
+//
+//    a  -  ellipsoidal semi-major axis
+//    b  -  ellipsoidal semi-minor axis
+//    f  -  flattening of the ellipsoid where
+//           1/f := a/(a - b)
+//    e  -  eccentricity of the ellipsoid where
+//           e^2 := 2*f - Power(f,2)
+//    e' -  second eccentricity where e'^2 = Power(e,2) / (1-Power(e,2))
+//    r  -  radius of curvature of the meridian at latitude j,
+//           where r = a (1-e^2)/(1-e^2*sin^2j)^(3/2)
+//    n  -  radius of curvature on the prime vertical (i.e. perpendicular to
+//          the meridian) at latitude j,
+//           where n = a/(1-e2sin2j)1/2
+//    j  -  latitude of the point to be transformed, positive if North
+//          and negative if South of the Equator
+//    l  -  longitude of the point to be transformed, positive if East
+//          and negative if West of the prime meridian
+//    j0 -  latitude of the natural origin
+//    l0 -  longitude of the natural origin (with respect to the prime meridian)
+//    jF -  latitude of the false origin
+//    lF -  longitude of the false origin (with respect to the prime meridian)
+//    j1 -  latitude of the first standard parallel
+//    j2 -  latitude of the second standard parallel
+//    k0 -  scale factor at the natural origin
+//    E  -  Easting measured from the grid origin
+//    N  -  Northing measured from the grid origin
+//    FE -  false easting, the Eastings value assigned to the natural origin
+//    FN -  false northing, the Northings value assigned to the natural origin
+//    EF -  Eastings value assigned to the false origin
+//    NF -  Northings value assigned to the false origin
+//    EC -  Eastings value assigned to the projection center
+//    NC -  Northings value assigned to the projection center
+//
+////////////////////////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////////////////////////
+procedure GKtoWGS(var ilat : double; var ilon : double; x : double; y : double);
+ var
+  Lat,  Lon,  Lat0,  Lon0,  Lat1,  Norting,  Easting,  nu1,  rho1,  e1,  mu1,
+  N,  M0,  M1,  T1,  C1,  D,  zone,  a,  e,  es,  k0,  esq,  alpha,  FN,
+  FE , E4, E6  : double;
+begin
+
+// a     := 6377563.396;
+// alpha := 1/299.32496;
+// FE    := 400000.00;
+// FN    := -100000.00;
+
+
+ FN    := 0;
+ FE    := 500000;
+ a     := 6378245;
+ alpha := 1 / 298.3; // сжатие Земли
+ K0    := 0.9996013;
+ Zone  := 39;
+
+ Lat0 := 0;
+ Lon0 := ZONE / 57.29577951;
+
+ Norting    := y ;
+ Easting    := x ;
+ esq  := (alpha) * 2 - Power(alpha,2);
+ e    := Power(esq,0.5);
+  E4 :=Power(e,4);
+  E6 :=Power(e,6);
+ M0  := a*(
+           (1 - esq/4   -  3*E4/64 -  5*E6/256 )*Lat0-
+           (  3*esq/8   +  3*E4/32 + 45*E6/1024)*Sin(2*Lat0)+
+           (  15*E4/256 + 45*E6/1024           )*Sin(4*Lat0)-
+           (  35*E6/3072                       )*Sin(6*Lat0)
+          );
+ M1   := M0 + (Norting - FN)/k0;
+ Mu1  := M1 / (a*(1 - esq/4 - 3*Power(e,4)/64 - 5*Power(e,6)/256));
+ e1   := (1-Power((1-power(e,2)),0.5)) / (1+Power((1-power(e,2)),0.5));
+ lat1 := mu1 + ((3*e1)/2 - 27*Power(e1,3)/32)*sin(2*Mu1) +
+               (21*Power(e1,2)/16 -55*Power(e1,4)/32)*sin(4*Mu1)+
+               (151*Power(e1,3)/96)*sin(6*Mu1) +
+               (1097*Power(e1,4)/512)*sin(8*Mu1);
+
+ nu1 := a /Power((1 - esq * Power(sin(lat1),2)),0.5);
+ rho1 := (a*(1 - esq)) / Power(1 - esq*Power(sin(lat1),2),1.5);
+// e1 := (1- Power((1 - esq),0.5)) / (1 + Power((1 - esq),0.5));
+ T1 := Power (tan(lat1),2);
+ es := esq/(1-esq);
+ C1 := es*Power (cos(lat1),2);
+ D := (Easting - FE)/(nu1*k0);
+
+ ilat := lat1 - (nu1*tan(lat1)/rho1)*(
+                D*D/2 -
+                (5 + 3*T1 + 10*C1 - 4*C1*C1 - 9*es)* power(D,4)/24 +
+                (61 + 90*T1 + 298*C1 + 45*T1*T1 - 252*es - 3*C1*C1)*Power(D,6)/720
+                );
+
+ ilon := lon0 + (D - (1 + 2*T1 + C1)*Power(D,3)/6 + (5 - 2*C1 + 28*T1 -
+                3*Power(C1,2) + 8*Power(es,2) + 24*Power(T1,2))*Power(D,5)/120) / cos(lat1)
+
+
+end;
+////////////////////////////////////////////////////////////////////////////////
+//
+//
+//
+////////////////////////////////////////////////////////////////////////////////
+function ToGMS(degree:Double):TGMS;
+var
+Gr,minute : integer;
+m,sec,
+a         : Extended;
+s,s1      : string;
+ begin
+   ToGMS.Gradus:=0;
+   ToGMS.Minute:=0;
+   ToGMS.Secund:=0;
+
+   if (degree > 360) or (degree <  -360)
+    then
+     begin
+      ToGMS.err:=true;
+      exit;
+     end;
+
+   gr:= Trunc(degree);
+   ToGMS.Gradus:=gr;
+   a:=degree-gr;
+   m:= a*60;
+   minute:=Trunc(m);
+   ToGMS.Minute:=minute;
+   a:=m-trunc(m);
+   sec:=a*60;
+   ToGMS.Secund:=sec;
+
+   str(gr,s1);
+   s:=s1+'°';
+   str(Minute,s1);
+   s:=s+s1+'''';
+   str(sec:2:3,s1);
+   s:=s+s1+'''''';
+
+   ToGMS.txt:=s;
+  end;
+
+function ToDeg(grad:TGMS):Extended;
+var
+a : extended;
+ begin
+  a:=grad.Gradus;
+  a:=a+grad.Minute/60;
+  ToDeg:=a+grad.Secund/3600;
+ end;
+
+
+end.
