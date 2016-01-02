@@ -1,4 +1,5 @@
 #include <QString>
+#include <QApplication>
 #include <gps.h>
 #include "radarobjects.h"
 
@@ -10,6 +11,7 @@
 
 #define FIX_AZIMUTH_SPEED 5
 #define FIX_AZIMUTH_METERS 10
+#define SYSGPSSLEEP 50
 
 #define GPSD_ADDR "localhost"
 //#define GPSD_ADDR "192.168.10.39"
@@ -86,8 +88,7 @@ public:
     int getangle(double x1, double y1, double x2, double y2);
     void WGStoGK(double iLat, double iLon, double *x, double *y);
     bool initgps();
-    bool waitgpsdata();
-    int getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int *speed, int *azimuth);
+    int getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int *speed, int *azimuth, int *num_satelites);
     void freegps();
     double getDistance(double lat1, double lon1, double lat2, double lon2);
 

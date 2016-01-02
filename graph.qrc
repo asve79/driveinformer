@@ -1,8 +1,15 @@
 <RCC>
     <qresource prefix="/">
-        <file alias="mute">img/mute-button.png</file>
-        <file alias="nosignal">img/no-signal.png</file>
-        <file alias="noradar">img/no_radar.png</file>
-        <file alias="trackrecord">img/trackrecord.png</file>
+        <file alias="yelowled">img/yellow1-led.png</file>
+        <file alias="yelowwled">img/yellow-led.png</file>
+        <file alias="redled">img/red-led.png</file>
+        <file alias="greenled">img/green-led.png</file>
+        <file alias="autozoom">img/zoom.png</file>
+        <file alias="noradar">img/no-cam-notify.png</file>
+        <file alias="mute">img/no-speed-notify.png</file>
+        <file alias="trackrecord">img/track-recordin.png</file>
+        <file alias="nosignal">img/gps-off.png</file>
+        <file alias="gpsconnected">img/gps-on.png</file>
+        <file alias="notrip">img/old/pathing.png</file>
     </qresource>
 </RCC>

@@ -1,3 +1,5 @@
+#include <QApplication>
+
 #ifndef SOUNDPLAY_H
 #define SOUNDPLAY_H
 
@@ -5,6 +7,8 @@
 
 /* Use the newer ALSA API */
 #define ALSA_PCM_NEW_HW_PARAMS_API
+#define ARM_DELAY_SND 500
+#define SND_QUEUE_SIZE 20
 
 typedef struct tpcmstorage
 {
@@ -18,8 +22,9 @@ typedef struct tpcmstorage
     struct tpcmstorage *next;
 } pcmstorage_type;
 
-class soundplay
-{
+class soundplay : public QObject {
+    Q_OBJECT
+
 private:
     int frame_buf_size;
     int numChannels;
@@ -28,6 +33,8 @@ private:
     snd_pcm_t *handle;
     snd_pcm_hw_params_t *params;
     snd_pcm_uframes_t frames;
+    bool playone(QString pcmId);
+    void playstr(QString pcmStr);
 
 #pragma pack(push,1)
     struct WAVType
@@ -51,13 +58,26 @@ private:
     pcmstorage_type *pcmstorage;
 
 public:
+    bool playing;
+    int *soundled;
     soundplay();
     ~soundplay();
     bool loadfromdir(QString path);
     bool addpcm(QString filename);
     void clearpcmstorage();
-    bool play(QString pcmId);
-    void playstr(QString pcmStr);
+    bool add(QString playsound);
+    int  getquecount();
+
+private:
+    QString playque[100];
+    int     playque_count;
+    int     playque_idx;
+
+public slots:
+    void play();
+
+signals:
+    void finished();
 };
 
 #endif // SOUNDPLAY_H

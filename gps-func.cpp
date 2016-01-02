@@ -1,6 +1,7 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QObject>
+#include <QThread>
 #include <math.h>
 #include <gps.h>
 #include "gpsmath.h"
@@ -31,7 +32,7 @@ void gps::unload_list_obj(struct mapobject *firstMO){
         currMO = nextMO;
         i++;
     }
-    qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "release " << i << " records from memory";
+    qDebug() << "release " << i << " records from memory";
 }
 
 //Градусы в радианы
@@ -84,8 +85,8 @@ mapObjectType* gps::load_info(QString *filename){
     mapRecordType mpTmp;
     struct mapobject *firstMapObject, *currMapObject, *newMapObject;
 
-    if ((in = fopen(filename->toAscii(),"rb"))==NULL){
-        qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "Error opening file " << filename;
+    if ((in = fopen(filename->toLatin1(),"rb"))==NULL){
+        qDebug() << "Error opening file " << filename;
         return NULL;
     }
 
@@ -98,7 +99,7 @@ mapObjectType* gps::load_info(QString *filename){
         fread(&mpTmp,sizeof(mpTmp),1,in);
         if (mpTmp.type>5) continue;                 //Берем пока информацию только о камерах
         if (!(newMapObject = (struct mapobject *)malloc(sizeof(struct mapobject)))){
-            qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "Memory allocation error";
+            qDebug() << "Memory allocation error";
             fclose(in);
             return firstMapObject;
         }
@@ -143,7 +144,7 @@ mapObjectType* gps::load_info(QString *filename){
 
 
     fclose(in);
-    qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << " Loaded " << i << " records";
+    qDebug() << " Loaded " << i << " records";
 
     return firstMapObject;
 }
@@ -159,11 +160,18 @@ bool gps::loadobjects(QString filename){
 //Загрузка данных и присоединение к загруженному списку.
 bool gps::appendobjects(QString filename){
     mapobject *newobj,*cobj;
+    int i=1;
     if ((newobj=load_info(&filename))!=NULL){
         cobj=mapObjects;
-        while (cobj->next != NULL)
+        while (cobj->next != NULL){
+            cobj->idx=i++;          //Переидексируем камеры
             cobj=cobj->next;
-        cobj->next = newobj;
+        }
+        cobj->next = newobj;        //А тут уже переиндексируем присоединяемый список камер
+        while (cobj != NULL){
+            cobj->idx=i++;
+            cobj=cobj->next;
+        }
         return true;
     }
      else
@@ -274,9 +282,9 @@ void gps::GPS_Math_XYZ_To_LatLonH(double *phi, double *lambda, double *H,
 
     while(fabs(phix-nphi)>(double)0.00000000001)
     {
-    nphi  = phix;
-    nu    = a / pow(((double)1.0-esq*sin(nphi)*sin(nphi)),(double)0.5);
-    phix  = atan((z+esq*nu*sin(nphi))/rho);
+	nphi  = phix;
+	nu    = a / pow(((double)1.0-esq*sin(nphi)*sin(nphi)),(double)0.5);
+	phix  = atan((z+esq*nu*sin(nphi))/rho);
     }
 
     *phi    = GPS_Math_Rad_To_Deg(phix);
@@ -372,35 +380,41 @@ QList<radar_objects_type> gps::get_objects_detected(double my_lat, double my_lon
     radar_objects_type rto;
 
     int distance;
+    int mylon_m= (int)lontometer(my_lat,my_lon); //!
+    int mylat_m= (int)lattometer(my_lat); //!
+    int area2=area*2;
 
     currMO = mapObjects ;
     int i=0;
     while (currMO != NULL){
         nextMO = currMO->next;
 
-        distance=getDistance(my_lat,my_lon,currMO->y,currMO->x);
-        if (distance <= area){
-            rto.id = currMO->idx;
-            rto.lat= currMO->y;
-            rto.lon= currMO->x;
-            rto.x= currMO->epx;
-            rto.y= currMO->epy;
-            rto.speedlimit= currMO->speed;
-            rto.angle= currMO->angle;
-            rto.cur_distance=distance;
-            rto.nearless = false;
-            rto.nearless_warn = false;
-            if (currMO->dirType==0)
-                rto.roundangle=true;
-            else
-                rto.roundangle=false;
-            summary.push_back(rto);
-            i++;
+	if (abs(mylat_m - currMO->epy) < area2)
+	 if (abs(mylon_m - currMO->epx) < area2){
+    	    distance=getDistance(my_lat,my_lon,currMO->y,currMO->x);
+    	    if (distance <= area){
+        	rto.id = currMO->idx;
+        	rto.lat= currMO->y;
+        	rto.lon= currMO->x;
+        	rto.x= currMO->epx;
+        	rto.y= currMO->epy;
+        	rto.speedlimit= currMO->speed;
+        	rto.angle= currMO->angle;
+        	rto.cur_distance=distance;
+        	rto.nearless = false;
+        	rto.nearless_warn = false;
+        	if (currMO->dirType==0)
+            	    rto.roundangle=true;
+        	else
+            	    rto.roundangle=false;
+        	summary.push_back(rto);
+        	i++;
 
-//            if ((rto.id==272828)||(rto.id==293578))
+//            	if ((rto.id==272828)||(rto.id==293578))
 //                qDebug() << rto.id << " " << rto.lat << " " << rto.lon << " x:" << rto.x << " y:" << rto.y;
 
-        }
+    	    }
+	}
 
         currMO = nextMO;
     }
@@ -483,54 +497,65 @@ void gps::WGStoGK(double iLat, double iLon, double *x, double *y)
 //Инициализируем подключеие к GPS
 bool gps::initgps()
 {
-    qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") <<"Connect to GPSd";
-    for (;;){
+    int res;
+    qDebug() <<"Connect to GPSd";
 //        if(gps_open("192.168.10.39", "2947", &gpsdata)<0){
-        if(gps_open("localhost", "2947", &gpsdata)<0){
-            qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "Could not connect to GPSd. Try to coccnect after 10 seconds...";
+    res=gps_open("localhost", "2947", &gpsdata);
+//    res=gps_open("localhost", "3334", &gpsdata);
+    qDebug() <<"result" << res;
+    if(res<0){
+        qDebug() << "Could not connect to GPSd. Try to coccnect after 10 seconds...";
+        return false;
+    } else {
+        qDebug() << "done";
+        res=gps_stream(&gpsdata, WATCH_ENABLE | WATCH_JSON, NULL);
+        qDebug() <<"result" << res;
+        if(res != 0){
+            qDebug() << "Error opening GPS stream.";
+            gps_close(&gpsdata);
             return false;
-        } else {
-            qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "done";
-            if(gps_stream(&gpsdata, WATCH_ENABLE | WATCH_JSON, NULL) != 0){
-                qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "Error opening GPS stream.";
-                gps_close(&gpsdata);
-                return false;
-            }
-            return true;
         }
+        return true;
     }
-}
-
-//Ждем данных
-bool gps::waitgpsdata()
-{
-
-    while(!gps_waiting(&gpsdata,1));
-    return gps_waiting(&gpsdata,1);
-
 }
 
 //Возвращаем данные
 //return code:
 //-1 error; 0 - no data 1 - success 2 - no satelites
-int gps::getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int *speed, int *azimuth)
+int gps::getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int *speed, int *azimuth, int *num_satelites)
 {
 
     int c_epx, c_epy;
+    int cnt=0;
+    int res;
 
-    if (!gps_waiting(&gpsdata,1)){
-//        qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "no data";
-        return 0;
-    }
-
-    while (gps_waiting(&gpsdata,1))
-        if(gps_read(&gpsdata)==-1){
-            qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") <<"GPSd waiting data error";
-            gps_stream(&gpsdata, WATCH_DISABLE, NULL);
+    qDebug() << "Check GPS.";
+    res=gps_waiting(&gpsdata,1);
+    qDebug() << "result " << res;
+    if (!res) return 0; //Нет данных
+    QThread::usleep(SYSGPSSLEEP);
+    qDebug() << "Get data...";
+    res=gps_waiting(&gpsdata,1);
+    while (res){
+        QThread::usleep(SYSGPSSLEEP);
+        res=gps_read(&gpsdata);
+        if((res==-1)||(cnt++ > 100)){
+           qDebug() <<"GPSd waiting data error. Count " << cnt;
+           QThread::usleep(SYSGPSSLEEP);
+           gps_stream(&gpsdata, WATCH_DISABLE, NULL);
+           QThread::usleep(SYSGPSSLEEP);
            gps_close(&gpsdata);
-           return -1;
+           return -1; //Либо слишком много данных либо проблема с данными. делаем переинициализацию
+        } else {
+            QThread::usleep(SYSGPSSLEEP);
+        }
+        qDebug() << "Wait status...";
+        res=gps_waiting(&gpsdata,1);
+        qDebug() << "result " << res;
     }
+    qDebug() << "Analyse data...";
 
+    *num_satelites=gpsdata.satellites_used;
     if ((gpsdata.fix.mode == MODE_2D)||(gpsdata.fix.mode == MODE_3D)){
         *time=gpsdata.fix.time;
         *lat=gpsdata.fix.latitude;
@@ -546,7 +571,7 @@ int gps::getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int 
             if ((gpsdata.fix.latitude==last_fix_gpsdata.fix.latitude)&&
                  gpsdata.fix.longitude==last_fix_gpsdata.fix.longitude){
                 *azimuth=l_azimuth;
-//                qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "coords equal, last az fix";
+//                qDebug() << "coords equal, last az fix";
             }else{
                 c_epx=*x;
                 c_epy=*y;
@@ -555,11 +580,11 @@ int gps::getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int 
                 last_epx=c_epx;
                 last_epy=c_epy;
                 l_azimuth=*azimuth;
-                qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "Normal fix" << *azimuth;
+                qDebug() << "Normal fix" << *azimuth;
             }
         }else{
             if (l_azimuth == -1){        //Если первая фиксация
-                qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "First fix";
+                qDebug() << "First fix";
                 last_fix_gpsdata=gpsdata;
                 last_epx=lontometer(gpsdata.fix.latitude,gpsdata.fix.longitude);
                 last_epy=lattometer(gpsdata.fix.latitude);
@@ -570,16 +595,18 @@ int gps::getgpsdata(double *time, double *lat, double *lon, int *x, int *y, int 
             }
         }
 
+        //qDebug() << "Satelites" << gpsdata.satellites_visible;
+        qDebug() << "END Analyse data...";
         return 1;
-    }else {
-        qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << " No GPS Signal";
+    }else { //если плохой сигнал
+        qDebug() << " No GPS Signal";
         return 2;
     }
-    }
+}
 
 void gps::freegps()
 {
-    qDebug() << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss") << "GPSd free";
+    qDebug() << "GPSd free";
     gps_stream(&gpsdata, WATCH_DISABLE, NULL);
     gps_close(&gpsdata);
 

@@ -8,10 +8,14 @@
 soundplay::soundplay()
 {
     int err;
+    soundled=NULL;
     pcmstorage=NULL;
     frame_buf_size=-1;
     numChannels=0;
     bitsPerSample=-1;
+    params=NULL;
+    playque_count=0;
+    playque_idx=0;
 
     if ((err = snd_pcm_open (&handle, "default", SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
         fprintf (stderr, "cannot open audio device %s (%s)\n",
@@ -20,25 +24,23 @@ soundplay::soundplay()
         exit (1);
     }
 
-    if ((err = snd_pcm_hw_params_malloc (&params)) < 0) {
-        fprintf (stderr, "cannot allocate hardware parameter structure (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    if ((err = snd_pcm_hw_params_any (handle, params)) < 0) {
-        fprintf (stderr, "cannot initialize hardware parameter structure (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
-    if ((err = snd_pcm_hw_params_set_access (handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-        fprintf (stderr, "cannot set access type (%s)\n",
-             snd_strerror (err));
-        exit (1);
-    }
-
+    playing=false;
     qDebug() << "Handle " << handle << " params " << params;
+}
+
+bool soundplay::add(QString playsound)
+{
+    if (playque_count >= SND_QUEUE_SIZE)
+        return false;
+    playque[playque_count+playque_idx]=playsound;
+    playque_count++;
+//    qDebug() << "SOUND add " << playsound << "idx will " << playque_count+playque_idx-1;
+    return true;
+}
+
+int soundplay::getquecount()
+{
+    return(playque_count);
 }
 
 soundplay::~soundplay()
@@ -114,7 +116,7 @@ bool soundplay::addpcm(QString filename)
 
     qDebug() << "loading " << filename;
 
-    if ((infile = fopen(filename.toAscii(),"rb"))==NULL){
+    if ((infile = fopen(filename.toLatin1(),"rb"))==NULL){
         qDebug() << "Error open file " << filename;
         return false;
     }
@@ -158,16 +160,27 @@ bool soundplay::addpcm(QString filename)
     return true;
 }
 
-bool soundplay::play(QString pcmId)
+bool soundplay::playone(QString pcmId)
 {
     pcmstorage_type *currpcm;
-    int rc,dir,frame_nums;
+    int err, rc,dir,frame_nums;
     unsigned int val,offs;
     bool reinit;
 
-    QTextCodec::setCodecForCStrings(QTextCodec::codecForName("UTF-8"));
+    if (playing){
+        qDebug() << "Alredy plaing";
+        if (soundled != NULL) *soundled=4;
+        return false;
+    }
+    playing=true;
+//    QTextCodec::setCodecForCStrings(QTextCodec::codecForName("UTF-8"));
 
-    if (pcmId=="")return false;
+    if (soundled != NULL) *soundled=3;
+    if (pcmId==""){
+        if (soundled != NULL) *soundled=0;
+        playing=false;
+        return false;
+    }
     currpcm=pcmstorage;
     reinit=false;
 
@@ -177,6 +190,8 @@ bool soundplay::play(QString pcmId)
         currpcm=currpcm->next;
     if (currpcm==NULL){
         qDebug() << pcmId << " not found in storage";
+        if (soundled != NULL) *soundled=0;
+        playing=false;
         return false;
     }
 
@@ -185,6 +200,43 @@ bool soundplay::play(QString pcmId)
     if (sampleRate != currpcm->sampleRate)reinit=true;
 
     if (reinit){
+        if (soundled != NULL) *soundled=2;
+
+        if (params != NULL){
+            qDebug() << "free old snd params";
+            snd_pcm_hw_params_free(params);
+        }
+
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        if ((err = snd_pcm_hw_params_malloc (&params)) < 0) {
+            qDebug() << "cannot allocate hardware parameter structure " << snd_strerror (err);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        if ((err = snd_pcm_hw_params_any (handle, params)) < 0) {
+            qDebug() <<  "cannot initialize hardware parameter structure " << snd_strerror (err);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        if ((err = snd_pcm_hw_params_set_access (handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
+            qDebug() <<  "cannot set access type " << snd_strerror (err);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+
         switch (currpcm->bitsPerSample) {
         case 8 :
             rc=snd_pcm_hw_params_set_format(handle, params,SND_PCM_FORMAT_U8);
@@ -204,85 +256,139 @@ bool soundplay::play(QString pcmId)
         }
         if (rc < 0){
             qDebug() << "Cant set PCM format to " << currpcm->bitsPerSample << " bits ";
+            if (soundled != NULL) *soundled=1;
+            playing=false;
             return false;
         } else
             bitsPerSample=currpcm->bitsPerSample;
-        qDebug() << "PCM format set to " << bitsPerSample << " BPS";
-    }
+        qDebug() << "PCM format set to " << bitsPerSample << " BPS ";
 
-    if (reinit){
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
         rc=snd_pcm_hw_params_set_channels(handle, params, currpcm->numChannels);
 
         if (rc < 0){
             qDebug() << "Cant set channels num to " << currpcm->numChannels;
+            if (soundled != NULL) *soundled=1;
+            playing=false;
             return false;
         }else
             numChannels=currpcm->numChannels;
         qDebug() << "Channels format set to " << numChannels;
-    }
 
-    if (reinit){
         val = currpcm->sampleRate;
+        qDebug() << "try setup " << val << "bitrate";
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
         rc=snd_pcm_hw_params_set_rate_near(handle, params, &val, &dir);
         if (rc < 0){
             qDebug() << "Cant set sampleRate to " << currpcm->sampleRate;
+            if (soundled != NULL) *soundled=1;
+            playing=false;
             return false;
         }else
             sampleRate=currpcm->sampleRate;
         qDebug() << "sample rate format set to " << sampleRate;
+
+        //    frames = currpcm->buf_size/(currpcm->bitsPerSample/8*currpcm->numChannels);
+        frames=128;
+        qDebug() << "frames calculated to " << frames;
+        //    frames=32;
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        rc=snd_pcm_hw_params_set_period_size_near(handle, params, &frames, &dir);
+        if (rc < 0){
+            qDebug() << "snd_pcm_hw_params_set_period_size_near error" << snd_strerror(rc);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+        qDebug() << "frames set to " << frames;
+
+        qDebug() << "Write the parameters to the driver";
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        rc = snd_pcm_hw_params(handle, params);
+        if (rc < 0) {
+            qDebug() << "unable to set hw parameters " << snd_strerror(rc);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+        qDebug() << "..done";
+
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        rc=snd_pcm_hw_params_get_period_size(params, &frames,&dir);
+        if (rc < 0){
+            qDebug() << "snd_pcm_hw_params_get_period_size error" << snd_strerror(rc);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+
+//        #ifdef Q_PROCESSOR_ARM
+//            usleep(ARM_DELAY_SND);
+//        #endif
+        rc=snd_pcm_hw_params_get_period_time(params, &val, &dir);
+        if (rc < 0){
+            qDebug() << "snd_pcm_hw_params_get_period_time error " << snd_strerror(rc);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
+            return false;
+        }
+        qDebug() << "snd_pcm_hw_params_get_period_time done";
+
     }
-
-
-//    frames = currpcm->buf_size/(currpcm->bitsPerSample/8*currpcm->numChannels);
-//    qDebug() << "frames calculated to " << frames;
-    frames=32;
-    rc=snd_pcm_hw_params_set_period_size_near(handle, params, &frames, &dir);
-    if (rc < 0){
-         qDebug() << "snd_pcm_hw_params_set_period_size_near error";
-         return false;
-    }
-
-    qDebug() << "frames set to " << frames;
-
-    /* Write the parameters to the driver */
-    rc = snd_pcm_hw_params(handle, params);
-    if (rc < 0) {
-        qDebug() << "unable to set hw parameters: %s\n" << snd_strerror(rc);
-        return false;
-    }
-
-    rc=snd_pcm_hw_params_get_period_size(params, &frames,&dir);
-    if (rc < 0){
-         qDebug() << "snd_pcm_hw_params_get_period_size error";
-         return false;
-    }
-
-
+    frame_nums=frames;
     frame_buf_size = frames * (bitsPerSample/8) * numChannels;
     qDebug() << "frame_buf_size = " <<frame_buf_size;
-
-    rc=snd_pcm_hw_params_get_period_time(params, &val, &dir);
-    if (rc < 0){
-         qDebug() << "snd_pcm_hw_params_get_period_time error";
-         return false;
-    }
-
-    frame_nums=frames;
+    if (soundled != NULL) *soundled=3;
 
     offs=0;
     while (offs < currpcm->buf_size ){
-//        qDebug() << "play step " << offs << "frames " << frame_nums;
+//        qDebug() << "play " << pcmId << " step " << offs << "frames " << frame_nums;
         rc = snd_pcm_writei(handle, currpcm->buffer+offs, frame_nums);
+        //QApplication::processEvents();
         if (rc == -EPIPE) {
             /* EPIPE means underrun */
             qDebug() << "underrun occurred";
-            snd_pcm_prepare(handle);
-            return false;
-        } else if (rc < 0) {
+            rc=snd_pcm_prepare(handle);
+            if (rc <0){
+                qDebug() << "Error snd_pcm_prepare " << snd_strerror(rc);
+                if (soundled != NULL) *soundled=2;
+            }else {
+                //QApplication::processEvents();
+                //usleep(1000);
+                if (soundled != NULL) *soundled=3;
+                rc = snd_pcm_writei(handle, currpcm->buffer+offs, frame_nums);
+                if (rc<0){
+                    qDebug() << "REPLAY error " << snd_strerror(rc);
+                    if (soundled != NULL) *soundled=1;
+                    playing=false;
+                    return false;
+                } else if (rc != (int)frame_nums) {
+                    qDebug() << "short write (2), write " << rc << "frames (must " << frame_nums <<")";
+                    if (soundled != NULL) *soundled=1;
+                    playing=false;
+                    return false;
+                }
+
+            }
+        } if (rc < 0) {
             qDebug() << "error from writei: " << snd_strerror(rc);
+            if (soundled != NULL) *soundled=1;
+            playing=false;
             return false;
         }  else if (rc != (int)frame_nums) {
             qDebug() << "short write, write " << rc << "frames (must " << frame_nums <<")";
+            if (soundled != NULL) *soundled=1;
+            playing=false;
             return false;
         }
         offs += frame_buf_size;
@@ -291,7 +397,12 @@ bool soundplay::play(QString pcmId)
         }
     }
 
+//    qDebug() << "drain reset";
+//    rc=snd_pcm_drain(handle);
 
+    qDebug() << "end play " << pcmId;
+    if (soundled != NULL) *soundled=0;
+    playing=false;
     return true;
 }
 
@@ -301,5 +412,23 @@ void soundplay::playstr(QString pcmStr)
 
  lst = pcmStr.split(" ");
  for (int i=0; i<lst.count();i++)
-     this->play(lst.at(i));
+     this->playone(lst.at(i));
 }
+
+void soundplay::play()
+{
+    while (playque_count != 0){
+//        qDebug() << "SOUND playing " << playque[playque_idx];
+
+//      playing=true;
+        playstr(playque[playque_idx]);
+//    playing=false;
+        playque_idx++;
+        if (playque_idx >= SND_QUEUE_SIZE)playque_idx=0;
+        playque_count--;
+//        qDebug() << "SOUND idx:" << playque_idx << "count" << playque_count;
+    }
+
+    emit finished();
+}
+
