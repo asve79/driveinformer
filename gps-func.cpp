@@ -8,6 +8,7 @@
 #include "gps-func.h"
 #include "radarobjects.h"
 
+//test
 gps::gps(){
     this->mapObjects=NULL;
     last_epx=-1;
