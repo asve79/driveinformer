@@ -679,6 +679,7 @@ void MainWindow::drawScreen0(){
 ////    this->update();
 //}
 
+//Главный цикл
 void MainWindow::gtimer_event()
 {
     double tmy_lat, tmy_lon, tmy_time;
@@ -823,10 +824,14 @@ void MainWindow::gtimer_event()
         samecount=0;
 
     //Если одинковые координаты и время и скорость>0 приходят уже больше 10 раз (5 секунд), значит скорее всего приема нет
-    if (samecount>10)
+    if ((!maybelostsignal)&&(samecount>10)){
         maybelostsignal=true;
-    else
+        snotify->play("gps_signal_lost");
+    }
+    if ((maybelostsignal)&&(samecount=0)){
         maybelostsignal=false;
+        snotify->play("gps_signal_online");
+    }
 
     //qDebug() << "GPS TIMER check cam_notify_on" << cam_notify_on;
     if (cam_notify_on)checkandnotifycam();
