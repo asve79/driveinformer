@@ -828,7 +828,7 @@ void MainWindow::gtimer_event()
         maybelostsignal=true;
         snotify->play("gps_signal_lost");
     }
-    if ((maybelostsignal)&&(samecount=0)){
+    if ((maybelostsignal)&&(samecount==0)){
         maybelostsignal=false;
         snotify->play("gps_signal_online");
     }
