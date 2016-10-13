@@ -748,7 +748,7 @@ void MainWindow::gtimer_event()
 //                    }
                         if (autorecordtrack&&(!recordingtrack)){
                             //qDebug() << "START TIME:" << my_time;
-			    recordingtrack=createtracklog();
+                            recordingtrack=createtracklog();
                             if (!recordingtrack) {
                                 autorecordtrack=false;
                                 qDebug() << "GPS TIMER Cant start autorecord track";
@@ -759,11 +759,12 @@ void MainWindow::gtimer_event()
 
                 if (satellitesignal&&!maybelostsignal){
                     if(QDateTime::fromTime_t(my_time).time().hour() != last_say_hour){
-		     if(!(my_time != my_time)){
-                        if (snotify->play("current_time " + say_time(QDateTime::fromTime_t(my_time).time().hour(),QDateTime::fromTime_t(my_time).time().minute()))){
-                            last_say_hour=QDateTime::fromTime_t(my_time).time().hour();
+                        if(!(my_time != my_time)){
+                            if (snotify->play("current_time " + say_time(QDateTime::fromTime_t(my_time).time().hour(),QDateTime::fromTime_t(my_time).time().minute()))){
+                                last_say_hour=QDateTime::fromTime_t(my_time).time().hour();
+                                last_say_unit=0; //Если сказали время, то скорость скажем уже с "километров в час"
+                            }
                         }
-		     }
                     }
                 }
                 //qDebug() << "GPS TIMER make_obj_list...";
@@ -1290,9 +1291,12 @@ QString MainWindow::say_time(int hour, int minute){
         {"minute3"}  //[ов]
     };
 
-    buf1=speech_numbers(hour) + " " + (QString)hours[get_last_word_idx(hour)];
-    if (minute != 0){
-        buf1=buf1+ " " + speech_numbers(minute) + " " + (QString)minutes[get_last_word_idx(minute)];
+    buf1=speech_numbers(hour);
+    if (minute == 0) {
+        buf1 = buf1 + " " + (QString)hours[get_last_word_idx(hour)];
+    } else {
+        buf1 = buf1+ " " + speech_numbers(minute);
+//        buf1=buf1+ " " + speech_numbers(minute) + " " + (QString)minutes[get_last_word_idx(minute)];
     }
 
     return buf1;
