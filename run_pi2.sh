@@ -1,5 +1,7 @@
 #!/bin/sh
 
+export QT_XKB_CONFIG_ROOT=/usr/share/X11/xkb
+
 curr=`/bin/date +'%s'`
 cd /home/pi/dev/rinf-gui
 nohup /usr/bin/gpspipe -r -o logs/pipelog-$curr.gpslog &
