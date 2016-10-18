@@ -1295,6 +1295,9 @@ QString MainWindow::say_time(int hour, int minute){
     if (minute == 0) {
         buf1 = buf1 + " " + (QString)hours[get_last_word_idx(hour)];
     } else {
+        if (minute < 10){
+            buf1 = buf1+ " 0 ";
+        }
         buf1 = buf1+ " " + speech_numbers(minute);
 //        buf1=buf1+ " " + speech_numbers(minute) + " " + (QString)minutes[get_last_word_idx(minute)];
     }
